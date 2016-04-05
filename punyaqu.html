@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+		<meta charset="utf-8">
+		<title>Complex Polylines</title>
+		<style>
+			html, body {
+				height: 100%;
+				margin: 0;
+				padding: 0;
+			}
+			#map {
+				height: 100%;
+			}
+			#container {
+				position: absolute;
+				top: 14px;
+				left : 8%;
+				z-index: 5;
+			}
+		</style>
+		<script src="https://www.google.com/jsapi"></script>
+		<script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyApDV4Kl0I6X7gnLX6SpP4m71AYmTV3BTU&callback=initMap"></script>
+	</head>
+	<body>
+		<div id="container">
+			<input type="button" value="Polyline" id="polyline">
+			<input type="button" value="Reload" id="reload" onclick="reloadContent()">
+		</div>
+		<div id="map" style="height:510px;"></div>
+		<div id="elevation_chart" style="width:98.5%"></div>
+		<script>
+			google.load('visualization', '1', {packages: ['columnchart']});
+			var poly;
+			//var map;
+			var polylines = [];
+
+			function reloadContent() {
+				initMap();
+				document.getElementById('elevation_chart').innerHTML=null;
+			}
+					
+			//untuk buat map	
+			function initMap() {
+				var tombol1 = document.getElementById('polyline');
+					
+				google.maps.event.addDomListener(tombol1, 'click', function() {
+					createPolyline();
+				});
+					
+				map = new google.maps.Map(document.getElementById('map'), {
+					zoom: 12,
+					center: {lat: -6.914744, lng: 107.609810} // Center the map on Bandung, Indnesia.
+				});
+					
+				//event ketika map di klik panggil fungsi addLatLng
+				map.addListener('click', addLatLng);			
+			}
+				
+			//fungsi untuk membuat polyline
+			function createPolyline() {
+				//untuk info windows polyline 
+				var infowindow = new google.maps.InfoWindow();
+				
+				//membuat object polyline
+				poly = new google.maps.Polyline({
+					strokeColor: '#000000',
+					strokeOpacity: 1.0,
+					strokeWeight: 5,
+					geodesic : true,
+					clickable : true
+				}); 
+					
+				polylines.push(poly); //tambahkan object polyline yang sudah di buat kedalam array			
+				poly.setMap(map); //gambar object polyline ke map
+					
+				//for 0 to panjang array polylines(isinya object polyline)
+				for(var i=0; i<polylines.length; i++) {
+					//event untuk tiap" object
+					polylines[i].addListener('click', function(event) {
+						//console.log(polylines[i-1]);
+						var data = polylines[i-1];
+						var bounds = new google.maps.LatLngBounds(); //object bounds
+						var coordinates = polylines[i-1].getPath().getArray(); //get polylines coordinate(array)
+						var polyLengthInMeters = google.maps.geometry.spherical.computeLength(polylines[i-1].getPath().getArray()); //panjang polyline
+						
+						//untuk mendapatkan titik tengah polyline
+						for (var j = 0; j < coordinates.length; j++) {
+							bounds.extend(coordinates[j]);
+						}
+														
+						//untuk elevasi tanah
+						var tes = polylines[i-1].getPath().getArray();
+						var path = [];
+							
+						//masukan lat dan long ke variable path(coordinate yang akan dilihat elevasi profile nya)
+						for (var y=0; y<tes.length; y++) {
+							var valueToPush = {};
+							valueToPush["lat"] = tes[y].lat();
+							valueToPush["lng"] = tes[y].lng();
+							path.push(valueToPush);
+						}
+						
+						//buat object elevator kemudian panggil fungsi displayPathElevation(untuk gambar elevator)
+						var elevator = new google.maps.ElevationService;
+
+						var pathRequest =  {
+							'path' : path,
+							'samples' : 500
+						}
+
+						//untuk gambar grafik elevasi tanah
+						elevator.getElevationAlongPath(pathRequest, plotElevation);
+
+						//untuk mendapatkan elevasi tertinggi + tampil info window
+						elevator.getElevationAlongPath(pathRequest, function(elevations, status) {
+							var tertinggi = 0;
+							var jarak = (polyLengthInMeters/1000).toFixed(4);
+							var fresnelzone = 17.31 * Math.sqrt(jarak*1000/(4*2437));
+							for(var i=0; i< elevations.length; i++) {
+								if(elevations[i].elevation>tertinggi) {
+									tertinggi = elevations[i].elevation;
+								}
+							}
+							var antena1 = tertinggi - elevations[0].elevation + fresnelzone;
+							var antena2 = tertinggi - elevations[elevations.length-1].elevation + fresnelzone;
+							console.log(antena1);
+							console.log(antena2);
+							infowindow.setContent('jarak : '+jarak+" KM<br>Titik Tertinggi : "+tertinggi.toFixed(4)+" M<br>Fresnel (r) : "+fresnelzone.toFixed(4)+" M<br>Min Tinggi Antena 1 : "+antena1.toFixed(4)+" M<br>Min Tinggi Antena 2 : "+antena2.toFixed(4)+" M");
+							infowindow.setPosition(bounds.getCenter());
+							infowindow.open(map);
+
+							//jika ketinggian tanah lebihd ari 1000 garis akan berwarna merah, else garis berwarna hijau
+							if(tertinggi>1000) {
+								data.setOptions({strokeColor:'red'});
+							}
+							else {
+								data.setOptions({strokeColor:'green'});
+							}
+						});
+
+					});	
+
+					polylines[i].addListener('rightclick', function(event) {
+						polylines[i-1].setOptions({strokeColor:'black'});
+					});		
+				} //end for				
+			}
+				
+			function plotElevation(elevations, status) {
+				var chartDiv = document.getElementById('elevation_chart');
+				if (status !== google.maps.ElevationStatus.OK) {
+					// Show the error code inside the chartDiv.
+					chartDiv.innerHTML = 'Cannot show elevation: request failed because ' +
+					status;
+					return;
+				}
+				// Create a new chart in the elevation_chart DIV.
+				var chart = new google.visualization.ColumnChart(chartDiv);
+
+				// Extract the data from which to populate the chart.
+				// Because the samples are equidistant, the 'Sample'
+				// column here does double duty as distance along the
+				// X axis.
+				var data = new google.visualization.DataTable();
+				data.addColumn('string', 'Sample');
+				data.addColumn('number', 'Elevation');
+				for (var i = 0; i < elevations.length; i++) {
+					data.addRow(['', elevations[i].elevation]);
+				}
+
+				// Draw the chart using the data within its DIV.
+				chart.draw(data, {
+					  height: 150,
+					  legend: 'none',
+					  titleY: 'Elevation (m)'
+				});
+			}
+
+			// Handles click events on a map, and adds a new point to the Polyline.
+			function addLatLng(event) {
+				var infowindow = new google.maps.InfoWindow();
+				var elevator = new google.maps.ElevationService;
+				//untuk menambahkan koordinate marker ke array dan akan dan akan menjadi polyline
+				var path = poly.getPath();
+				path.push(event.latLng);
+						
+				//buat marker
+				var marker = new google.maps.Marker({
+					position: event.latLng,
+					title: '#' + path.getLength(),
+					animation: google.maps.Animation.DROP,
+					map: map
+				});
+						
+				//event marker on click, akan muncul info window
+				marker.addListener('click', function(event) {
+					displayLocationElevation(event.latLng, marker, elevator, infowindow);
+				});
+			}
+
+			
+			function displayLocationElevation(location, marker, elevator, infowindow) {
+  				// Initiate the location request
+				elevator.getElevationForLocations({'locations': [location]}, function(results, status) {
+					//infowindow.setPosition(location);
+			    	if (status === google.maps.ElevationStatus.OK) {
+			      		// Retrieve the first result
+			      		if (results[0]) {
+			        		infowindow.setContent("Latitude : "+marker.position.lat().toFixed(4)+"<br>Longitude : "+marker.position.lng().toFixed(4)+"<br>Elevation : "+results[0].elevation.toFixed(4)+" M");
+			            	infowindow.open(map, marker);
+			      		} 
+			      		else {
+			        		infowindow.setContent('No results found');
+			        		infowindow.open(map, marker);
+			      		}
+			    	} 
+			    	else {
+			      		infowindow.setContent('Elevation service failed due to: ' + status);
+			      		infowindow.open(map, marker);
+			    	}
+			  	});
+			}
+		</script>
+  </body>
+</html>
